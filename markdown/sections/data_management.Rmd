@@ -1,0 +1,95 @@
+---
+title: "HRECOS: Data Management"
+output: html_document
+author: Zachary M. Smith
+---
+
+# Introduction
+
+The goal of this section is to append HRECOS data provided by Stevens Insitute of Technology into a single CSV for each data type (raw and post).
+
+Z. Smith requested and recieved HRECOS data from David Runnels (Stevens Institute of Technology) on 9/20/2018. The data was provided in two zipped folders ("raw_data" and "post_data") representing two data types (i.e., raw = unaltered data; post = processed/approved data). In each folder the files represent data for individual stations in a long data format. The files are stored as ".dat" but are CSVs.
+
+# Setup
+
+Import packages from the __tidyverse__ for data processing.
+```{r}
+suppressPackageStartupMessages(
+  library(tidyverse)
+)
+```
+
+Find the R-project root directory, which will be used to establish file paths in scripts below.
+```{r}
+root.dir <- rprojroot::find_root("trends.Rproj")
+```
+
+Establish a connection to the HRECOS PostgreSQL database. This connection will be used to write data to the database in subsequent scripts.
+```{r}
+con <- DBI::dbConnect(
+  odbc::odbc(),
+  driver = "PostgreSQL Unicode(x64)",
+  database = "hrecos",
+  UID = rstudioapi::askForPassword("Database user"),
+  PWD = rstudioapi::askForPassword("Database password"),
+  host = "localhost",
+  port = 5432
+  )
+```
+
+# Preprocess Data from Stevens Institute of Technology
+
+This script loops through the "raw_data" and "post_data" folders, imports all of the ".dat" files, appends the files into a single data frame, and exports the data frame into the HRECOS PostgreSQL database.
+```{r, results="hide", eval=process.stevens}
+lapply(c("raw_data", "post_data"), function(dir.i) {
+  file.vec <- list.files(
+    file.path(root.dir,
+              "data",
+              "stevens_institute",
+              dir.i)
+  )
+  
+  import.df <- purrr::map_df(file.vec, function(file.i) {
+    path.i <- file.path(root.dir,
+                "data",
+                "stevens_institute",
+                dir.i,
+                file.i)
+    # print(file.i)
+    size.i <- file.size(path.i)
+    
+    if (size.i > 0) {
+      data.table::fread(
+      path.i,
+      col.names = c("station",
+                    "parameter",
+                    "date_time",
+                    "value",
+                    "flag",
+                    "comment")
+    ) %>% 
+        mutate(date_time = as.POSIXct(date_time,
+                                format = "%Y-%m-%d %H:%M:%S",
+                                tz = "GMT"),
+         date_time = format(date_time, 
+                             tz = "EST"))
+    }
+    
+  })
+  
+  # data.table::fwrite(import.df,
+  #                    file.path(root.dir,
+  #                              "data",
+  #                              "cleaned",
+  #                              paste0(dir.i, ".csv")))
+  
+   DBI::dbWriteTable(con, dir.i, import.df)
+})
+```
+
+```{r}
+DBI::dbWriteTable(con, "test", cars, 
+                  field.types = list("text", "text"))
+
+```
+
